@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: health
+      POSTGRES_USER: health
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}
+    volumes:
+      - health-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U health -d health"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+  api:
+    build: .
+    environment:
+      HEALTH_API_TOKEN: ${HEALTH_API_TOKEN:?Run python scripts/init_env.py first}
+      HEALTH_DATABASE_URL: postgresql+psycopg://health:${POSTGRES_PASSWORD}@db:5432/health
+      HEALTH_TIMEZONE: ${HEALTH_TIMEZONE:-Asia/Shanghai}
+      HEALTH_HOST: 0.0.0.0
+      HEALTH_PORT: 8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+volumes:
+  health-data:

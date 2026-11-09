@@ -1,0 +1,11 @@
+{
+  "source": "apple_health",
+  "observations": [
+    {"date": "2026-11-09", "metric": "weight_kg", "value": 60.5},
+    {"date": "2026-11-09", "metric": "steps", "value": 1234},
+    {"date": "2026-11-09", "metric": "active_energy_kcal", "value": 225.5},
+    {"date": "2026-11-09", "metric": "sleep_minutes", "value": 420},
+    {"date": "2026-11-09", "metric": "resting_heart_rate_bpm", "value": 65},
+    {"date": "2026-11-09", "metric": "workout_minutes", "value": 20}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "personal-health": {
+      "command": "/absolute/path/health-agent/.venv/bin/health-agent-mcp",
+      "args": [],
+      "cwd": "/absolute/path/health-agent"
+    }
+  }
+}

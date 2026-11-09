@@ -4,6 +4,16 @@
 
 这是可运行的第一版源码。运行服务、配置聊天客户端以及 iPhone 上的健康授权是三个独立步骤；项目不会自动取得你的真实健康数据。
 
+## 手机快速使用：免费手动导入
+
+如果你要在手机 ChatGPT 中使用已有的「阿迪的健康日志」，最快的方式是：
+
+**iPhone 健康 App → 头像 → 导出所有健康数据 → 在“文件”中解压 → 健康日志网页“聊天与数据”→ 选择 export.xml。**
+
+导入后，在手机 ChatGPT 选择该插件查询已保存的运动和睡眠记录。无需额外购买同步 App，也无需先运行下面的独立 Python 后端。完整步骤和范围见[手机免费导入说明](docs/mobile-free-import.md)。
+
+现有网页及插件源码位于 `sites/health-journal/`，使用 Site 的 D1 数据库；以下 FastAPI/PostgreSQL 后端仍是独立存储，尚未与手机插件自动互通。文件导入是手动操作，后台自动同步尚未配置。
+
 ## 可以做什么
 
 - 记录、查询、纠正和删除饮食；热量使用 kcal，营养素使用 g。照片由聊天端估算，经你确认后调用记录工具。
@@ -78,7 +88,7 @@ docker compose exec -T db pg_dump -U health -d health > health-backup.sql
 
 默认地址 `http://127.0.0.1:8001/mcp`，所有请求都需要独立的 `HEALTH_MCP_TOKEN`。若经过自己的 HTTPS 反向代理，配置 `HEALTH_MCP_PUBLIC_ORIGIN=https://你的域名`；需要监听其他网卡时再配置 `HEALTH_MCP_HOST`。不要将未启用 HTTPS 的服务暴露到互联网。反向代理必须保留 Authorization 和 Host，并禁用健康请求体日志。
 
-**ChatGPT 网页／手机端连接取决于其支持的 MCP 认证方式。** 本项目尚未安装到你的 ChatGPT 账号。支持静态 Bearer 头的 MCP 客户端可直接连接；若 ChatGPT 的连接界面要求 OAuth，则需先部署符合 MCP OAuth 规范的认证网关。V1 不实现 OAuth 授权服务器，不应为绕过认证而公开健康接口。本机 stdio 进程也不能直接被 ChatGPT 网页或手机调用。
+**直接连接自定义 MCP 目前受 ChatGPT 网页版及账号权限限制，不能据此承诺手机可用。** 支持静态 Bearer 头的 MCP 客户端可连接这个独立服务；ChatGPT 认证需遵循其支持的 OAuth 等方式，V1 不实现 OAuth 授权服务器。本机 stdio 也不能直接被 ChatGPT 网页或手机调用。手机当前使用的是上面已有的 Site 插件；仅部署这个独立后端或增加 OAuth 不会自动连接该插件。[官方连接限制](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt)
 
 ## iPhone / Apple Watch 同步
 
@@ -121,9 +131,13 @@ docker compose exec -T db pg_dump -U health -d health > health-backup.sql
 ```bash
 .venv/bin/pytest -q
 .venv/bin/ruff check .
+npm --prefix sites/health-journal test
+npm --prefix sites/health-journal run build
 ```
 
 测试覆盖认证、非法输入、持久化、重复同步、饮食重试与纠错、时区边界、来源优先级、缺失数据、MCP 工具和同步客户端。实际 PostgreSQL 与 MCP 协议验证结果记录在 [docs/verification.md](docs/verification.md)。
+
+网页部分使用 Node.js 24，无额外 npm 依赖；其测试通过实际页面导入逻辑和内存 SQLite 验证跨夜睡眠、设备标识变化、重复导入修正及账号隔离。
 
 ## API 约定
 

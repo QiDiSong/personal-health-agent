@@ -1,0 +1,10 @@
+{
+  "name": "adi-health-journal",
+  "private": true,
+  "version": "1.0.1",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "build": "node scripts/build.mjs"
+  }
+}

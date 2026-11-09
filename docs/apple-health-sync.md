@@ -1,5 +1,7 @@
 # Apple 健康每日同步
 
+如果你希望尽快在手机 ChatGPT 中使用现有健康日志，先看[免费 XML 导入步骤](mobile-free-import.md)。它不需要下面的独立 API 部署；下面说明的是另一套每日汇总上传方案。
+
 这个版本接收你授权导出的每日汇总。Python 脚本只上传 JSON，不会读取 iPhone、Apple Watch 或 Apple 账号。这里没有原生 iOS 后台 HealthKit 集成，也不是 Apple 或 OpenAI 的官方 Health 插件。快捷指令需要在你的 iPhone 上创建、授权和运行；本仓库没有已经在真机验证的通用六指标自动采集快捷指令。
 
 ## 先准备服务和权限

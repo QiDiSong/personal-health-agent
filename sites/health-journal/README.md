@@ -1,32 +1,29 @@
-# 阿迪的健康日志
+# 阿迪的月度健康日志
 
-现有 ChatGPT Sites 私有健康日志：网页和手机 ChatGPT 插件读取同一份 D1 数据库。
+现有 owner-private ChatGPT Site，网页、Windows 和手机 ChatGPT 插件读取同一份持久 D1 日志。每月从 iPhone「健康」导出一次，直接导入 ZIP，回看最近30天或历史月份。无需快捷指令、额外 App 或 Python 后端。
 
-## 免费开始导入 Apple 健康
+## 每月使用
 
-无需另外购买同步 App 或服务器。先使用现成的手动 XML 导入：
+1. iPhone「健康」→ 头像 →「导出所有健康数据」→ 保存 ZIP 到「文件」。苹果导出包含全部历史。
+2. Safari 登录健康日志 →「导入每月健康文件」→ 选择 ZIP，等待完成。无需手动解压，也支持 `export.xml`。
+3. 「月度健康」选择最近30天或一个具体月份；重复导入更新相同标识，历史记录持续保留。
 
-1. 在 iPhone「健康」App 打开头像，选择「导出所有健康数据」，保存到「文件」。
-2. 在「文件」中轻点导出的 ZIP 解压，找到 `export.xml`。
-3. 打开健康日志网页，用同一个账号登录，选择「聊天与数据」。
-4. 在「Apple 健康」中选择解压后的 `export.xml`，等待导入完成。
-5. 核对运动、睡眠记录，再在手机 ChatGPT 中选择健康日志插件查询。
+[完整使用说明与指标范围](docs/monthly-health.md)。网页支持饮食营养、睡眠、具体训练、活动、体重和常见身体指标。手表不会识别吃了什么；没有记录在健康中的饮食可在网页或手机 ChatGPT 补记。估算会标明，未知不补成0。
 
-必须选择 XML，不能直接选择 ZIP 或 `export_cda.xml`。原始 XML 在浏览器中解析，接口只接收提取后的运动、睡眠、体重记录。无需将完整健康导出文件发送到聊天。
+ZIP/XML在浏览器解析，只上传结构化记录。文件上限200MiB，XML解压上限150MiB，不支持ZIP64；超大文件不能保证在手机解析。导入可分批保存，网络中断后可重新选择同一文件重试。手机端删除的数据不会自动删掉网页旧记录。首次应核对实际睡眠、运动和一天步数。
 
-这是手动导入，不代表开启后台自动同步；新增数据需要再次导出、导入。重复标识会更新已有记录。大文件的导出和解析速度取决于设备与历史数据量，不能保证任意大小都能在手机中处理。
+累计指标按单来源日总量取最大，避免叠加iPhone和Watch；体征使用有效样本最多的单一来源平均值，可能与Apple来源优先级统计不同。同日营养按字段优先Apple汇总，再用补记餐食合计，避免重复相加。
 
-官方步骤：[导出健康数据](https://support.apple.com/zh-cn/guide/iphone/iph5ede58c3d/27/ios/27)、[解压 ZIP](https://support.apple.com/zh-cn/102532)。
+## 开发
 
-## 开发与验证
-
-使用 Node.js 24，无第三方依赖：
+使用Node.js24，固定esbuild0.28.2与fflate0.8.2构建；运行时依赖打包进Worker/本地ZIP读取脚本。第三方许可见[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ```sh
-npm test
+npm ci
 npm run build
+npm test
 ```
 
-构建输出为 `dist/server/index.js`。部署保留现有 `.openai/hosting.json` 的站点身份、D1 绑定与 MCP 能力；所有记录仍按已认证的站点用户隔离保存。不要将真实健康数据或访问令牌加入源码。
+构建生成 `worker/archive-browser.js` 和 `dist/server/index.js`。前者跟踪在源码中以支持直接执行Node测试，修改压缩读取源码后需重新构建。保留现有 `.openai/hosting.json` 的站点身份、D1绑定和MCP能力。不要将真实健康文件、数据库或令牌加入Git。
 
-个人页面显示的参考起点与身高分别读取私有运行配置 `PROFILE_BASELINE_KG` 和 `PROFILE_HEIGHT_CM`，未配置时保持未知。实际测量记录仍保存在 D1；配置值和数据库文件不写入 GitHub。
+个人显示配置 `PROFILE_BASELINE_KG` / `PROFILE_HEIGHT_CM` 仅由Sites秘密运行配置提供。可选的[原生快捷指令](docs/native-shortcuts-windows.md)入口仍保留；它需要额外一次性搭建，不是每月文件导入的前提。其 `PHONE_SYNC_GATEWAY_TOKEN` 仅用于所有者下载私人连接文件，设备凭证哈希存储并可撤销。

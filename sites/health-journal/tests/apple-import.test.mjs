@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import vm from 'node:vm';
+import { zipSync, strToU8 } from 'fflate';
 
-const workerSource = await readFile(new URL('../worker/index.js', import.meta.url), 'utf8');
-const { default: worker } = await import('data:text/javascript;base64,' + Buffer.from(workerSource).toString('base64'));
+const { default: worker } = await import('../worker/index.js');
 const page = await (await worker.fetch(new Request('https://journal.test/'), {})).text();
 const script = page.match(/<script>([\s\S]*?)<\/script>/)[1];
 
@@ -54,7 +53,7 @@ async function importer({ storage, failImportBatch } = {}) {
   };
   const state = { today: '2026-11-09', entries: [], plan: [], goal: null, latestWeight: null };
   const context = vm.createContext({
-    DOMParser: FixtureDOMParser,
+    DOMParser: FixtureDOMParser,TextDecoder,TextEncoder,
     document: { querySelector: element, addEventListener: (name, handler) => listeners.set(name, handler) },
     fetch: async (_url, options) => {
       const request = JSON.parse(options.body);
@@ -68,9 +67,10 @@ async function importer({ storage, failImportBatch } = {}) {
   vm.runInContext(script, context);
   await vm.runInContext('refresh()', context);
   return {
-    async run(records) {
+    async run(records, suppliedFile) {
       imported.length = 0;
-      const target = { id: 'xml', disabled: false, files: [{ text: async () => xml(records) }] };
+      const file=suppliedFile??new File([xml(records)],'export.xml',{type:'application/xml'});
+      const target = { id: 'xml', disabled: false, files: [file] };
       await listeners.get('change')({ target });
       assert.equal(target.disabled, false);
       return { entries: structuredClone(imported), status: element('#status').textContent };
@@ -226,7 +226,7 @@ test('a connected session waking in the future is skipped as a whole', async () 
   assert.deepEqual(entries, []);
 });
 
-test('workout and weight mapping and all deterministic import IDs remain stable', async () => {
+test('workout active duration, separate ring time and deterministic import IDs stay stable', async () => {
   const app = await importer();
   const fixture = [
     { nodeName: 'Workout', workoutActivityType: 'HKWorkoutActivityTypeBadminton', startDate: on('2026-11-08', '18:00'), endDate: on('2026-11-08', '19:30'), duration: '70', durationUnit: 'min' },
@@ -236,8 +236,9 @@ test('workout and weight mapping and all deterministic import IDs remain stable'
   ];
   const first = await app.run(fixture);
   assert.deepEqual(first.entries, [
-    { id: 'apple:workout:1794132000000:1794137400000', kind: 'workout', day: '2026-11-08', minutes: 90, label: '羽毛球' },
+    { id: 'apple:workout:1794132000000:1794137400000', kind: 'workout', day: '2026-11-08', minutes: 70, label: '羽毛球' },
     { id: 'apple:weight:1794096000000:1794096000000', kind: 'weight', day: '2026-11-08', kg: 90.7, label: 'Apple 健康体重' },
+    { id: 'apple:activity:2026-11-08',day:'2026-11-08',kind:'activity',label:'Apple 健康活动',apple_exercise_minutes:90 },
     { id: 'apple:sleep:2026-11-08', day: '2026-11-08', kind: 'sleep', label: 'Apple 健康睡眠', minutes: 480, bed: '23:00', wake: '07:00' },
   ]);
   assert.deepEqual((await app.run(fixture)).entries, first.entries);
@@ -315,4 +316,17 @@ test('cleanup validates all candidates before making any deletion', async t => {
   }), { DB: storage.DB });
   assert.equal(response.status, 400);
   assert.deepEqual(storage.rows(), [prior]);
+});
+
+
+test('the actual page imports a monthly ZIP with nutrition, activity, vitals, sleep and workouts', async () => {
+ const storage=memoryDB();try{
+ const app=await importer({storage});
+ const q=(type,value,unit,sourceName='Watch')=>({type:'HKQuantityTypeIdentifier'+type,value:String(value),unit,sourceName,startDate:on('2026-11-08','12:00'),endDate:on('2026-11-08','12:10')});
+ const records=[q('StepCount',2000,'count'),q('StepCount',1500,'count','iPhone'),q('DietaryEnergyConsumed',1800,'kcal','Food'),q('DietaryProtein',100,'g','Food'),q('OxygenSaturation',0.98,'%'),record('Asleep',on('2026-11-07','23:00'),on('2026-11-08','07:00')),{nodeName:'Workout',workoutActivityType:'HKWorkoutActivityTypeWalking',startDate:on('2026-11-08','18:00'),endDate:on('2026-11-08','19:00'),duration:'50',durationUnit:'min'}];
+ const file=new File([zipSync({'apple_health_export/export.xml':strToU8(xml(records))})],'export.zip');
+ const result=await app.run([],file);assert.match(result.status,/已处理/);
+ const rows=storage.rows();assert.equal(rows.find(r=>r.kind==='activity').steps,2000);assert.equal(rows.find(r=>r.kind==='nutrition').kcal,1800);assert.equal(rows.find(r=>r.kind==='nutrition').protein,100);assert.equal(rows.find(r=>r.kind==='vitals').spo2_percent,98);assert.equal(rows.find(r=>r.kind==='sleep').minutes,480);assert.equal(rows.find(r=>r.kind==='workout').minutes,50);
+ await app.run([],file);assert.equal(storage.rows().length,5);
+ }finally{storage.close();}
 });

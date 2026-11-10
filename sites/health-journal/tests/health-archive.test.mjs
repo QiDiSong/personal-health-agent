@@ -80,6 +80,23 @@ test('accepts export.xml at the root, case-insensitive names and streamed ZIP da
   assert.equal(await readHealthFile(file(zip([{ name: 'EXPORT.XML', flags: 0x808 }]))), xml);
 });
 
+test('reads the Chinese Apple Health 导出.xml member in 导出.zip', async () => {
+  for (const method of [0, 8]) {
+    const bytes = zip([
+      { name: 'apple_health_export/导出.xml', method, flags: 0x808 },
+      { name: 'apple_health_export/export_cda.xml', text: '<ClinicalDocument/>' },
+    ]);
+    assert.equal(await readHealthFile(file(bytes, '导出.zip')), xml);
+  }
+});
+
+test('rejects ambiguous English and Chinese health XML members', async () => {
+  await assert.rejects(readHealthFile(file(zip([
+    { name: 'apple_health_export/export.xml' },
+    { name: 'apple_health_export/导出.xml' },
+  ]))), /多个|唯一/i);
+});
+
 test('rejects missing or ambiguous export.xml before choosing an entry', async () => {
   await assert.rejects(readHealthFile(file(zip([{ name: 'export_cda.xml' }]))), /export\.xml/i);
   await assert.rejects(readHealthFile(file(zip([{ name: 'export.xml' }, { name: 'backup/export.xml' }]))), /多个|multiple|唯一/i);

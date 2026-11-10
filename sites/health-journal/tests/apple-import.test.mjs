@@ -324,7 +324,7 @@ test('the actual page imports a monthly ZIP with nutrition, activity, vitals, sl
  const app=await importer({storage});
  const q=(type,value,unit,sourceName='Watch')=>({type:'HKQuantityTypeIdentifier'+type,value:String(value),unit,sourceName,startDate:on('2026-11-08','12:00'),endDate:on('2026-11-08','12:10')});
  const records=[q('StepCount',2000,'count'),q('StepCount',1500,'count','iPhone'),q('DietaryEnergyConsumed',1800,'kcal','Food'),q('DietaryProtein',100,'g','Food'),q('OxygenSaturation',0.98,'%'),record('Asleep',on('2026-11-07','23:00'),on('2026-11-08','07:00')),{nodeName:'Workout',workoutActivityType:'HKWorkoutActivityTypeWalking',startDate:on('2026-11-08','18:00'),endDate:on('2026-11-08','19:00'),duration:'50',durationUnit:'min'}];
- const file=new File([zipSync({'apple_health_export/export.xml':strToU8(xml(records))})],'export.zip');
+ const file=new File([zipSync({'apple_health_export/导出.xml':strToU8(xml(records))})],'导出.zip');
  const result=await app.run([],file);assert.match(result.status,/已处理/);
  const rows=storage.rows();assert.equal(rows.find(r=>r.kind==='activity').steps,2000);assert.equal(rows.find(r=>r.kind==='nutrition').kcal,1800);assert.equal(rows.find(r=>r.kind==='nutrition').protein,100);assert.equal(rows.find(r=>r.kind==='vitals').spo2_percent,98);assert.equal(rows.find(r=>r.kind==='sleep').minutes,480);assert.equal(rows.find(r=>r.kind==='workout').minutes,50);
  await app.run([],file);assert.equal(storage.rows().length,5);

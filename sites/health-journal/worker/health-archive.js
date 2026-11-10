@@ -79,8 +79,9 @@ async function findExport(file) {
     const nameBytes = directory.subarray(offset + 46, offset + 46 + nameSize), name = decodeName(nameBytes);
     checkPath(name);
     checkExtra(directory.subarray(offset + 46 + nameSize, offset + 46 + nameSize + extraSize));
-    if (name.split('/').at(-1).toLowerCase() === 'export.xml') {
-      if (selected) throw new Error('ZIP 中有多个 export.xml，请解压后选择唯一的 Apple 健康 export.xml。');
+    // Apple localizes this member name when Health exports in Chinese.
+    if (/^(?:export|导出)\.xml$/i.test(name.split('/').at(-1))) {
+      if (selected) throw new Error('ZIP 中有多个健康数据 XML，请解压后选择唯一的 export.xml 或 导出.xml。');
       if (flags & 0x41) throw new Error('不支持加密 ZIP，请选择 Apple 健康原始导出的 ZIP。');
       if (method !== 0 && method !== 8) throw new Error('此 ZIP 压缩方式不受支持，请先在本机解压并选择 export.xml。');
       if (flags & 0x2020) throw invalidZIP();
@@ -91,7 +92,7 @@ async function findExport(file) {
     offset = next;
   }
   if (offset !== directory.length) throw invalidZIP();
-  if (!selected) throw new Error('ZIP 中没有找到 export.xml，请选择 Apple 健康导出的 export.zip。');
+  if (!selected) throw new Error('ZIP 中没有找到 export.xml 或 导出.xml。请在「文件」中解压，再选择健康数据 XML；不要选择 export_cda.xml。');
   return selected;
 }
 

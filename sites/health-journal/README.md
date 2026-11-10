@@ -1,6 +1,6 @@
 # 阿迪的月度健康日志
 
-现有 owner-private ChatGPT Site，网页、Windows 和手机 ChatGPT 插件读取同一份持久 D1 日志。每月从 iPhone「健康」导出一次，直接导入 ZIP，回看最近30天或历史月份。无需快捷指令、额外 App 或 Python 后端。
+现有 owner-private ChatGPT Site，网页、Windows 和手机 ChatGPT 插件读取同一份持久 D1 日志。每月从 iPhone「健康」导出一次，选择最近30天或指定月份后，直接导入原始ZIP；历史月份需要逐月导入并保留。无需快捷指令、额外 App 或 Python 后端。
 
 ## 每月使用
 
@@ -10,13 +10,13 @@
 
 [完整使用说明与指标范围](docs/monthly-health.md)。网页支持饮食营养、睡眠、具体训练、活动、体重和常见身体指标。手表不会识别吃了什么；没有记录在健康中的饮食可在网页或手机 ChatGPT 补记。估算会标明，未知不补成0。
 
-ZIP/XML在浏览器解析，只上传结构化记录。文件上限200MiB，XML解压上限150MiB，不支持ZIP64；超大文件不能保证在手机解析。导入可分批保存，网络中断后可重新选择同一文件重试。手机端删除的数据不会自动删掉网页旧记录。首次应核对实际睡眠、运动和一天步数。
+ZIP/XML在浏览器解析，只上传结构化记录。网页按选定月份分段扫描全部历史，支持最高4GiB的普通ZIP/XML；ZIP64可先解压后选择4GiB以内XML。只在内存保留所选范围（含睡眠边界缓冲）的片段，最多64MiB／20万条，超出会提示，不承诺任意大文件都能在手机处理。导入可分批保存，网络中断后可重新选择同一文件重试。手机端删除的数据不会自动删掉网页旧记录。首次应核对实际睡眠、运动和一天步数。
 
 累计指标按单来源日总量取最大，避免叠加iPhone和Watch；体征使用有效样本最多的单一来源平均值，可能与Apple来源优先级统计不同。同日营养按字段优先Apple汇总，再用补记餐食合计，避免重复相加。
 
 ## 开发
 
-使用Node.js24，固定esbuild0.28.2与fflate0.8.2构建；运行时依赖打包进Worker/本地ZIP读取脚本。第三方许可见[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+使用Node.js24，固定esbuild0.28.2、fflate0.8.2与saxes6.0.0构建；运行时依赖打包进Worker/本地ZIP读取脚本。第三方许可见[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ```sh
 npm ci

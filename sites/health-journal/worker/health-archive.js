@@ -1,11 +1,24 @@
 import { Inflate } from 'fflate';
+import { createHealthXMLWindow } from './health-xml-window.js';
 
-export const MAX_HEALTH_FILE_BYTES = 200 * 1024 * 1024;
-export const MAX_XML_BYTES = 150 * 1024 * 1024;
+export const MAX_HEALTH_FILE_BYTES = 4 * 1024 * 1024 * 1024;
+export const MAX_XML_BYTES = 4 * 1024 * 1024 * 1024;
+const LEGACY_XML_BYTES = 150 * 1024 * 1024;
 const MAX_DIRECTORY_BYTES = 16 * 1024 * 1024;
 const CHUNK_BYTES = 16 * 1024;
+const COMPRESSED_CHUNK_BYTES = 4 * 1024;
+const XML_CHUNK_BYTES = 64 * 1024;
+const YIELD_INTERVAL_MS = 40;
 const invalidZIP = () => new Error('ZIP 压缩文件已损坏或格式不受支持，请重新从 Apple 健康导出。');
-const zip64Error = () => new Error('暂不支持 ZIP64 或分卷 ZIP，请先在本机解压，再选择 150 MB 以内的 export.xml。');
+const zip64Error = () => new Error('暂不支持 ZIP64 或分卷 ZIP，请先在本机解压，再选择 4 GiB 以内的 export.xml 或 导出.xml。');
+const xmlLimitError = limit => new Error(limit === LEGACY_XML_BYTES
+  ? '未选择导入月份时，XML 处理上限为 150 MB；请选择月份后导入原始完整健康数据文件。'
+  : '健康数据 XML 超过 4 GiB，已达到当前导入上限。');
+const now = () => globalThis.performance?.now() ?? Date.now();
+
+function checkAbort(signal) {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('导入已取消。', 'AbortError');
+}
 
 const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
   for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0);
@@ -47,7 +60,7 @@ function checkExtra(bytes) {
   }
 }
 
-async function findExport(file) {
+async function findExport(file, xmlLimit) {
   // Read the bounded end record and directory, never the unrelated ECG/route
   // payloads. Apple exports can contain many of those files.
   const tailStart = Math.max(0, file.size - 65557);
@@ -85,7 +98,7 @@ async function findExport(file) {
       if (flags & 0x41) throw new Error('不支持加密 ZIP，请选择 Apple 健康原始导出的 ZIP。');
       if (method !== 0 && method !== 8) throw new Error('此 ZIP 压缩方式不受支持，请先在本机解压并选择 export.xml。');
       if (flags & 0x2020) throw invalidZIP();
-      if (size > MAX_XML_BYTES) throw new Error('export.xml 超过 150 MB，请使用较小的健康数据文件。');
+      if (size > xmlLimit) throw xmlLimitError(xmlLimit);
       if (localOffset + 30 > directoryOffset || compressedSize > directoryOffset - localOffset) throw invalidZIP();
       selected = { flags, method, crc, compressedSize, size, localOffset, nameBytes, directoryOffset };
     }
@@ -109,45 +122,108 @@ async function payloadOffset(file, entry) {
   return payloadStart;
 }
 
-async function readXML(file, start, compressedSize, entry) {
-  const decoder = new TextDecoder('utf-8', { fatal: true }), parts = [];
-  let size = 0, crc = 0xffffffff;
-  const accept = bytes => {
-    size += bytes.length;
-    if (size > MAX_XML_BYTES || (entry && size > entry.size)) throw new Error('export.xml 解压后的大小超出限制或声明大小。');
-    if (entry) for (let index = 0; index < bytes.length; index++) crc = crcTable[(crc ^ bytes[index]) & 255] ^ (crc >>> 8);
-    try { parts.push(decoder.decode(bytes, { stream: true })); }
+async function readXML(file, start, compressedSize, entry, { xmlLimit, xmlWindow, onProgress, signal }) {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  // Only the compatibility path retains the complete XML. Month imports send
+  // decoded chunks straight to the bounded SAX filter.
+  const parts = xmlWindow ? null : [];
+  let size = 0, crc = 0xffffffff, readBytes = 0, lastYield = now();
+  const reportProgress = () => onProgress?.({
+    readBytes, totalBytes: compressedSize, xmlBytes: size,
+    ...(xmlWindow ? { keptRecords: xmlWindow.stats.keptRecords } : {}),
+  });
+  const yieldIfNeeded = async () => {
+    checkAbort(signal);
+    if (now() - lastYield < YIELD_INTERVAL_MS) return;
+    reportProgress();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    lastYield = now();
+    checkAbort(signal);
+  };
+  const decode = bytes => {
+    try { return decoder.decode(bytes, { stream: true }); }
     catch { throw new Error('export.xml 不是有效的 UTF-8 编码文件，请重新从 Apple 健康导出。'); }
   };
-  const inflater = entry?.method === 8 ? new Inflate(accept) : null;
-  try {
-    if (compressedSize === 0 && inflater) inflater.push(new Uint8Array(), true);
-    for (let offset = 0; offset < compressedSize; offset += CHUNK_BYTES) {
-      const end = Math.min(offset + CHUNK_BYTES, compressedSize);
-      const bytes = await readSlice(file, start + offset, start + end);
-      if (inflater) inflater.push(bytes, end === compressedSize);
-      else accept(bytes);
+  const accept = bytes => {
+    size += bytes.length;
+    if (size > xmlLimit || (entry && size > entry.size)) throw new Error('export.xml 解压后的大小超出限制或声明大小。');
+    if (entry) for (let index = 0; index < bytes.length; index++) crc = crcTable[(crc ^ bytes[index]) & 255] ^ (crc >>> 8);
+    const text = decode(bytes);
+    if (xmlWindow) xmlWindow.write(text);
+    else parts.push(text);
+  };
+  const consume = async bytes => {
+    // A tiny compressed chunk can expand substantially. Parse its output in
+    // smaller pieces so timers and user input can run during that expansion.
+    for (let offset = 0; offset < bytes.length; offset += XML_CHUNK_BYTES) {
+      checkAbort(signal);
+      accept(bytes.subarray(offset, offset + XML_CHUNK_BYTES));
+      await yieldIfNeeded();
     }
-  } catch (error) {
-    if (/export\.xml/.test(error.message)) throw error;
-    throw invalidZIP();
+  };
+  let producedBytes = 0, receiverError;
+  const inflated = [];
+  const inflater = entry?.method === 8 ? new Inflate(bytes => {
+    producedBytes += bytes.length;
+    if (producedBytes > xmlLimit || producedBytes > entry.size) {
+      receiverError = new Error('export.xml 解压后的大小超出限制或声明大小。');
+      throw receiverError;
+    }
+    inflated.push(bytes);
+  }) : null;
+  const inflate = (bytes, final) => {
+    try { inflater.push(bytes, final); }
+    catch { throw receiverError ?? invalidZIP(); }
+  };
+  checkAbort(signal);
+  reportProgress();
+  if (compressedSize === 0 && inflater) inflate(new Uint8Array(), true);
+  // Inflate itself is synchronous, so also bound compressed input: 16 KiB of
+  // highly repetitive history can expand to many MiB before it returns.
+  const chunkBytes = inflater ? COMPRESSED_CHUNK_BYTES : CHUNK_BYTES;
+  for (let offset = 0; offset < compressedSize; offset += chunkBytes) {
+    checkAbort(signal);
+    const end = Math.min(offset + chunkBytes, compressedSize);
+    const bytes = await readSlice(file, start + offset, start + end);
+    checkAbort(signal);
+    readBytes = end;
+    if (inflater) {
+      inflate(bytes, end === compressedSize);
+      for (const output of inflated) await consume(output);
+      inflated.length = 0;
+    } else await consume(bytes);
+    await yieldIfNeeded();
   }
   if (entry && size !== entry.size) throw new Error('export.xml 解压后的大小与 ZIP 声明大小不一致，文件可能已损坏。');
   if (entry && ((crc ^ 0xffffffff) >>> 0) !== entry.crc) throw new Error('export.xml 的 CRC 校验失败，ZIP 文件可能已损坏。');
-  try { parts.push(decoder.decode()); }
+  let tail;
+  try { tail = decoder.decode(); }
   catch { throw new Error('export.xml 不是有效的 UTF-8 编码文件，请重新从 Apple 健康导出。'); }
+  checkAbort(signal);
+  if (xmlWindow) {
+    xmlWindow.write(tail);
+    const selected = xmlWindow.end();
+    reportProgress();
+    return selected;
+  }
+  parts.push(tail);
+  reportProgress();
   return parts.join('');
 }
 
 /** Read Apple Health XML or ZIP in the browser. No file bytes leave the device. */
-export async function readHealthFile(file) {
+export async function readHealthFile(file, { from, to, onProgress, signal } = {}) {
+  checkAbort(signal);
   if (!file || typeof file.name !== 'string' || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error('请选择 Apple 健康导出的 XML 或 ZIP 文件。');
-  if (file.size > MAX_HEALTH_FILE_BYTES) throw new Error('文件超过 200 MB，请先在本机解压，再选择 150 MB 以内的 export.xml。');
+  if (file.size > MAX_HEALTH_FILE_BYTES) throw new Error('文件超过 4 GiB，已达到当前 ZIP/XML 导入上限；ZIP 可先在本机解压，再选择 4 GiB 以内的健康数据 XML。');
+  const xmlWindow = from !== undefined || to !== undefined ? createHealthXMLWindow({ from, to }) : null;
+  const xmlLimit = xmlWindow ? MAX_XML_BYTES : LEGACY_XML_BYTES;
+  const options = { xmlLimit, xmlWindow, onProgress, signal };
   if (/\.xml$/i.test(file.name)) {
-    if (file.size > MAX_XML_BYTES) throw new Error('XML 文件超过 150 MB，请使用较小的健康数据文件。');
-    return readXML(file, 0, file.size);
+    if (file.size > xmlLimit) throw xmlLimitError(xmlLimit);
+    return readXML(file, 0, file.size, undefined, options);
   }
   if (!/\.zip$/i.test(file.name)) throw new Error('请选择 Apple 健康导出的 XML 或 ZIP 文件。');
-  const entry = await findExport(file), start = await payloadOffset(file, entry);
-  return readXML(file, start, entry.compressedSize, entry);
+  const entry = await findExport(file, xmlLimit), start = await payloadOffset(file, entry);
+  return readXML(file, start, entry.compressedSize, entry, options);
 }

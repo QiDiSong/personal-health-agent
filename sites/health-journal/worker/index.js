@@ -75,7 +75,7 @@ export default {async fetch(req,env){
  if(path==='/mcp'){
   const reply=result=>json({jsonrpc:'2.0',id:data.id,result});
   if(data.method==='server/discover')return reply({supportedVersions:['2026-07-28'],capabilities:{tools:{}}});
-  if(data.method==='initialize')return reply({protocolVersion:data.params?.protocolVersion??'2026-07-28',capabilities:{tools:{}},serverInfo:{name:'adi-health',version:'1.2.0'}});
+  if(data.method==='initialize')return reply({protocolVersion:data.params?.protocolVersion??'2026-07-28',capabilities:{tools:{}},serverInfo:{name:'adi-health',version:'1.3.0'}});
   if(data.method==='notifications/initialized')return new Response(null,{status:202});
   if(data.method==='tools/list')return reply({tools:toolList});
   if(data.method==='tools/call'){try{const name=data.params?.name;if(!toolList.some(t=>t.name===name))throw Error('未知工具');return reply({content:[{type:'text',text:JSON.stringify(await action(env.DB,owner,name,data.params.arguments??{},privateProfile(env)))}]});}catch(e){return reply({isError:true,content:[{type:'text',text:e.message}]});}}
@@ -115,6 +115,14 @@ function entry(r){return '<div class="entry row"><div><b>'+esc(r.label)+'</b> <s
 function grouped(rows){return Object.keys(labels).map(k=>'<article><h3>'+labels[k]+'</h3>'+(rows.filter(r=>r.kind===k).map(entry).join('')||empty('暂无记录'))+'</article>').join('');}
 function graph(rows,key,days){if(!rows.length)return empty('记录后显示趋势');const vals=rows.map(r=>r[key]);const lo=Math.min(...vals),hi=Math.max(...vals);const points=rows.map(r=>[305-(Date.parse(state.today)-Date.parse(r.day))/864e5*290/(days-1),115-(r[key]-lo)/(hi-lo||1)*90]);
 return '<svg class="chart" viewBox="0 0 320 140" role="img" aria-label="按日期绘制趋势"><path d="M15 115H305 M15 70H305 M15 25H305" stroke="#dbe7db"/><polyline points="'+points.map(p=>p.join(',')).join(' ')+'" fill="none" stroke="#237b62" stroke-width="2"/>'+points.map((p,i)=>'<circle cx="'+p[0]+'" cy="'+p[1]+'" r="4" fill="#237b62"><title>'+rows[i].day+' '+rows[i][key]+'</title></circle>').join('')+'</svg><div class="row"><small>最近 '+days+' 天</small><small>范围 '+round(lo)+'–'+round(hi)+(key==='kg'?' kg':' 分钟')+'</small></div>';}
+function healthImportWindow(){
+ if(!state)throw Error('请等待日志读取完成后再选择文件。');
+ if(!selectedMonth)return {from:new Date(Date.parse(state.today)-29*864e5).toISOString().slice(0,10),to:state.today};
+ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth)||selectedMonth>state.today.slice(0,7))throw Error('请选择有效的导入月份。');
+ const end=new Date(Date.UTC(Number(selectedMonth.slice(0,4)),Number(selectedMonth.slice(5)),0)).toISOString().slice(0,10);
+ return {from:selectedMonth+'-01',to:end<state.today?end:state.today};
+}
+function importRangeControls(){return '<div class="fields"><label>导入范围<select id="import-mode"><option value="recent" '+(!selectedMonth?'selected':'')+'>最近 30 天</option><option value="calendar" '+(selectedMonth?'selected':'')+'>指定月份</option></select></label><label>月份<input type="month" id="import-month" max="'+state.today.slice(0,7)+'" value="'+(selectedMonth||state.today.slice(0,7))+'" '+(!selectedMonth?'disabled':'')+'></label></div><p class="muted">可直接选择包含多年历史的原始 ZIP。网页会分段扫描，只导入以上日期的数据；以前已保存的月份继续保留。</p>';}
 function render(){
  const today=state.entries.filter(r=>r.day===state.today),meals=today.filter(r=>r.kind==='meal'),sleep=today.filter(r=>r.kind==='sleep'),work=today.filter(r=>r.kind==='workout'),w=state.latestWeight;
  $('#date').textContent=state.today+' · 私人健康日志';$('#month-controls').hidden=view!=='month';$('#metrics').hidden=view==='month';$('#month-picker').max=state.today.slice(0,7);$('#month-picker').value=selectedMonth||state.today.slice(0,7);$('#month-picker').disabled=!selectedMonth;$('#month-mode').value=selectedMonth?'calendar':'recent';$('#plan').innerHTML=state.plan.map(x=>'<p>'+esc(x)+'</p>').join('');
@@ -124,7 +132,7 @@ function render(){
  const goal=state.goal,baseline=state.baselineKg,pct=goal&&baseline!=null&&goal<baseline&&w?Math.max(0,Math.min(100,(baseline-w.kg)/(baseline-goal)*100)):null;
  const goalBox='<article><h3>目标进度</h3><p class="muted">'+(goal?'目标 '+goal+' kg':'目标体重待设置')+'</p>'+(pct!=null?'<progress max="100" value="'+pct+'"></progress><p>约 '+round(pct)+'% · 以 '+esc(baseline)+' kg 自述约值为起点</p>':'')+'<form id="goal" class="row"><label>目标体重（kg）<input type="number" min="20" max="500" step="0.1" required value="'+(goal??'')+'"></label><button>保存目标</button></form></article>';
  if(view==='month'){$('#content').innerHTML=renderMonthDashboard(state,{from:state.from||new Date(Date.parse(state.today)-29*864e5).toISOString().slice(0,10),to:state.to||state.today,title:selectedMonth?selectedMonth+' 月度健康':'最近 30 天健康记录'});return;}
- if(view==='connect'){$('#content').innerHTML='<div class="grid"><article><h3>Apple 健康</h3><p class="pill">每月一次 · 导入健康数据</p><p>不想搭快捷指令，每月导入一次 Apple 健康的 ZIP 或 export.xml，补齐运动、睡眠、体重、步数和可用的营养、身体指标。苹果导出包含全部历史，月报显示最近 30 天。重复导入会更新对应记录，并仅清理与本文件旧版结果完全匹配的过期睡眠日记录。</p><p>健康 App → 头像 → 导出所有健康数据 → 保存到「文件」；在这里直接选择导出的 ZIP，无需解压。也支持解压后的 export.xml。</p><label>选择每月导出的 ZIP 或 XML 并导入<input type="file" id="xml" accept=".zip,.xml,application/zip,text/xml,application/xml"></label><p><small>选择文件后会自动开始导入，无需再点「继续」。这是手动导入；新增数据需再次导出导入。ZIP/XML 在浏览器解析，仅上传结构化记录。支持常见健康指标；没有记录在健康中的饮食需另行补记。步数、能量、营养按单一来源汇总，避免手机与手表重复相加，可能与健康 App 的来源优先级统计不同。文件最多 200 MiB，解压 XML 最多 150 MiB。</small></p></article><article><h3>用 ChatGPT 记录</h3><p>连接本站的私有插件后，可在聊天里写入和查询同一份日志。</p><ul><li>记录今天午餐，米饭约 150 克和一份番茄炒蛋，估算营养。</li><li>记录今天打羽毛球 90 分钟。</li><li>看看今天的计划和本周体重趋势。</li></ul></article></div><details class="card"><summary>可选：快捷指令上传（需首次搭建）</summary>'+phonePanel+'</details>';loadPhoneDevices();return;}
+ if(view==='connect'){$('#content').innerHTML='<div class="grid"><article><h3>Apple 健康</h3><p class="pill">每月一次 · 导入健康数据</p><p>不想搭快捷指令，每月导入一次 Apple 健康的 ZIP 或 export.xml，补齐运动、睡眠、体重、步数和可用的营养、身体指标。苹果导出包含全部历史，月报显示最近 30 天。重复导入会更新对应记录，并仅清理与本文件旧版结果完全匹配的过期睡眠日记录。</p><p>健康 App → 头像 → 导出所有健康数据 → 保存到「文件」；在这里直接选择导出的 ZIP，无需解压。也支持解压后的 export.xml。</p>'+importRangeControls()+'<label>选择每月导出的 ZIP 或 XML 并导入<input type="file" id="xml" accept=".zip,.xml,application/zip,text/xml,application/xml"></label><p><small>选择文件后会自动开始导入，无需再点「继续」。这是手动导入；新增数据需再次导出导入。ZIP/XML 在浏览器解析，仅上传结构化记录。支持常见健康指标；没有记录在健康中的饮食需另行补记。步数、能量、营养按单一来源汇总，避免手机与手表重复相加，可能与健康 App 的来源优先级统计不同。支持分段读取最高 4 GiB 的普通 ZIP/XML，不会把完整历史装进内存。扫描时请保持页面打开；只保存选定范围内的记录。</small></p></article><article><h3>用 ChatGPT 记录</h3><p>连接本站的私有插件后，可在聊天里写入和查询同一份日志。</p><ul><li>记录今天午餐，米饭约 150 克和一份番茄炒蛋，估算营养。</li><li>记录今天打羽毛球 90 分钟。</li><li>看看今天的计划和本周体重趋势。</li></ul></article></div><details class="card"><summary>可选：快捷指令上传（需首次搭建）</summary>'+phonePanel+'</details>';loadPhoneDevices();return;}
  if(view==='today'){
  const macros=[['蛋白质','protein'],['脂肪','fat'],['碳水','carbs']].map(([l,k])=>l+' '+(sum(meals,k)==null?'':approx)+display(sum(meals,k),'g')).join('　');
  const hints=[...(!sleep.length?['今天还没有睡眠记录。']:[]),...(meals.some(r=>r.kcal==null)?['部分饮食记录缺少热量，汇总可能偏低。']:[]),...(!w?['还没有实际体重记录，暂时无法计算目标进度。']:[])];
@@ -145,29 +153,33 @@ ${[appleSleepSource,appleSleepRows,appleSleepDayRows,appleLegacySleepRows].map(f
 document.addEventListener('change',async e=>{
  if(e.target.id==='month-mode'){selectedMonth=e.target.value==='calendar'?state.today.slice(0,7):'';await refresh();return;}
  if(e.target.id==='month-picker'){if(/^\d{4}-\d{2}$/.test(e.target.value)&&e.target.value<=state.today.slice(0,7)){selectedMonth=e.target.value;await refresh();}return;}
+ if(e.target.id==='import-mode'){selectedMonth=e.target.value==='calendar'?state.today.slice(0,7):'';render();return;}
+ if(e.target.id==='import-month'){if(/^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value)&&e.target.value<=state.today.slice(0,7)){selectedMonth=e.target.value;}return;}
  if(e.target.id!=='xml'||!e.target.files.length)return;
  e.target.disabled=true;message('正在解析 Apple 健康导出…');
  try{
- const xml=new DOMParser().parseFromString(await HealthArchive.readHealthFile(e.target.files[0]),'application/xml');if(xml.querySelector('parsererror')||xml.documentElement.nodeName!=='HealthData')throw Error('请选择 Apple 健康导出的 ZIP 或 export.xml。');
+ const range=healthImportWindow(),today=state.today;
+ const xmlText=await HealthArchive.readHealthFile(e.target.files[0],{...range,onProgress:p=>{const percent=p.totalBytes?Math.floor(p.readBytes/p.totalBytes*100):0;message('正在分段扫描历史数据 '+percent+'% · 已展开读取 '+Math.floor((p.xmlBytes??0)/1048576)+' MiB · 已筛选 '+(p.keptRecords??0)+' 条记录，请保持页面打开…');}});
+ const xml=new DOMParser().parseFromString(xmlText,'application/xml');if(xml.querySelector('parsererror')||xml.documentElement.nodeName!=='HealthData')throw Error('请选择 Apple 健康导出的 ZIP 或 export.xml。');
  const rows=[],sleepRecords=[],quantityRecords=[];
  for(const n of xml.querySelectorAll('Record, Workout')){
   const attr=k=>n.getAttribute(k)||'',type=attr('type'),kind=n.nodeName==='Workout'?'workout':type==='HKQuantityTypeIdentifierBodyMass'?'weight':type==='HKCategoryTypeIdentifierSleepAnalysis'?'sleep':'';
   if(!kind){if(/^HKQuantityTypeIdentifier(?:StepCount|ActiveEnergyBurned|BasalEnergyBurned|AppleExerciseTime|DistanceWalkingRunning|Dietary(?:EnergyConsumed|Protein|FatTotal|Carbohydrates|Fiber|Sugar|Sodium|Water)|HeartRate|RestingHeartRate|HeartRateVariabilitySDNN|OxygenSaturation|RespiratoryRate|BodyFatPercentage|BodyMassIndex)$/.test(type))quantityRecords.push(Object.fromEntries(['type','value','unit','startDate','endDate','sourceName','device'].map(k=>[k,attr(k)])));continue;}
   const start=parse(attr('startDate')),end=parse(attr('endDate'));if(!Number.isFinite(start)||!Number.isFinite(end)||end<start)continue;
   if(kind==='sleep'){sleepRecords.push({start,end,value:attr('value'),source:appleSleepSource(attr('sourceName'),attr('device'))});continue;}
-  const day=bjDate(start).slice(0,10);if(day>state.today)continue;
+  const day=bjDate(start).slice(0,10);if(day<range.from||day>range.to||day>today)continue;
   const id='apple:'+kind+':'+start+':'+end;
   if(kind==='weight'){const unit=attr('unit'),kg=Number(attr('value'))*({kg:1,lb:.45359237,g:.001}[unit]??NaN);if(kg>=20&&kg<=500)rows.push({id,kind,day,kg:round(kg),label:'Apple 健康体重'});}
   if(kind==='workout'){const duration=Number(attr('duration')),factor={min:1,s:1/60,hr:60,h:60}[attr('durationUnit')];const minutes=round(attr('duration')&&Number.isFinite(duration)&&duration>0&&factor?duration*factor:(end-start)/60000);if(minutes>=1&&minutes<=1440){const raw=attr('workoutActivityType').replace('HKWorkoutActivityType','');rows.push({id,kind,day,minutes,label:({Badminton:'羽毛球',Basketball:'篮球',Cycling:'骑行',Running:'跑步',Walking:'步行'})[raw]||raw||'Apple 健康运动'});}}
  }
- for(const r of quantityRows(quantityRecords,{today:state.today}))rows.push(r);
- const sleeps=appleSleepRows(sleepRecords,state.today),sleepIDs=new Set(sleeps.map(r=>r.id));
+ for(const r of quantityRows(quantityRecords,{today,from:range.from,to:range.to}))rows.push(r);
+ const allSleeps=appleSleepRows(sleepRecords,today),sleeps=allSleeps.filter(r=>r.day>=range.from&&r.day<=range.to),sleepIDs=new Set(allSleeps.map(r=>r.id));
  for(const r of sleeps)rows.push(r);
- const obsolete=appleLegacySleepRows(sleepRecords,state.today).filter(r=>!sleepIDs.has(r.id));
- if(!rows.length)throw Error('文件中没有可导入的已支持健康指标。');
+ const obsolete=appleLegacySleepRows(sleepRecords,today).filter(r=>r.day>=range.from&&r.day<=range.to&&!sleepIDs.has(r.id));
+ if(!rows.length)throw Error('所选日期 '+range.from+' 至 '+range.to+' 没有可导入的已支持健康指标，请确认导入月份。');
  for(let i=0;i<rows.length;i+=500){message('正在保存 '+Math.min(i+500,rows.length)+' / '+rows.length+' 条结构化记录…');await api('import_health',{entries:rows.slice(i,i+500)});}
  for(let i=0;i<obsolete.length;i+=500)await api('reconcile_apple_sleep',{entries:obsolete.slice(i,i+500)});
- await refresh();message('已处理 '+rows.length+' 条 Apple 健康记录，重复项按标识更新'+(obsolete.length?'，并已核对旧版睡眠拆分记录':'')+'。');
+ await refresh();message('已处理 '+rows.length+' 条 Apple 健康记录（'+range.from+' 至 '+range.to+'），重复项按标识更新'+(obsolete.length?'，并已核对旧版睡眠拆分记录':'')+'。');
  }catch(err){e.target.value='';message('导入未完成：'+err.message);}finally{e.target.disabled=false;}
 });
 ${phoneClient}

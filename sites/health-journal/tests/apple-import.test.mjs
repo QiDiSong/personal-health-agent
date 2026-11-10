@@ -53,7 +53,7 @@ async function importer({ storage, failImportBatch } = {}) {
   };
   const state = { today: '2026-11-09', entries: [], plan: [], goal: null, latestWeight: null };
   const context = vm.createContext({
-    DOMParser: FixtureDOMParser,TextDecoder,TextEncoder,
+    DOMParser: FixtureDOMParser,TextDecoder,TextEncoder,setTimeout,
     document: { querySelector: element, addEventListener: (name, handler) => listeners.set(name, handler) },
     fetch: async (_url, options) => {
       const request = JSON.parse(options.body);
@@ -329,4 +329,22 @@ test('the actual page imports a monthly ZIP with nutrition, activity, vitals, sl
  const rows=storage.rows();assert.equal(rows.find(r=>r.kind==='activity').steps,2000);assert.equal(rows.find(r=>r.kind==='nutrition').kcal,1800);assert.equal(rows.find(r=>r.kind==='nutrition').protein,100);assert.equal(rows.find(r=>r.kind==='vitals').spo2_percent,98);assert.equal(rows.find(r=>r.kind==='sleep').minutes,480);assert.equal(rows.find(r=>r.kind==='workout').minutes,50);
  await app.run([],file);assert.equal(storage.rows().length,5);
  }finally{storage.close();}
+});
+
+test('the actual page selects one calendar month from full history without importing sleep buffer dates', async () => {
+ const app=await importer();
+ vm.runInContext("selectedMonth='2026-10'",app.context);
+ const rows=[
+  {nodeName:'Workout',workoutActivityType:'HKWorkoutActivityTypeWalking',startDate:on('2025-10-15','10:00'),endDate:on('2025-10-15','11:00')},
+  {nodeName:'Workout',workoutActivityType:'HKWorkoutActivityTypeWalking',startDate:on('2026-10-15','10:00'),endDate:on('2026-10-15','11:00')},
+  record('Asleep',on('2026-09-30','23:00'),on('2026-10-01','07:00')),
+  record('AsleepCore',on('2026-10-31','23:00'),on('2026-10-31','23:30')),
+  record('AsleepREM',on('2026-10-31','23:30'),on('2026-11-01','07:00')),
+ ];
+ const result=await app.run(rows);
+ assert.match(result.status,/已处理/);
+ assert.equal(result.entries.length,2);
+ assert.ok(result.entries.every(r=>r.day>='2026-10-01'&&r.day<='2026-10-31'));
+ assert.equal(result.entries.find(r=>r.kind==='sleep').minutes,480);
+ assert.equal(result.entries.find(r=>r.kind==='sleep').day,'2026-10-01');
 });

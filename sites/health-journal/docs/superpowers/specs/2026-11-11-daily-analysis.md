@@ -1,0 +1,14 @@
+# Daily data interpretation and suggestions
+
+User requests a feature that analyses their saved diet, exercise, sleep and other health data each day and ends with advice. Use the current private Site/database and free deterministic calculations: no new API subscription or external model/data transfer.
+
+Add 每日解析 navigation. Default to the latest recorded day, clearly dated, because monthly uploads may not contain today. Allow a calendar date, previous/next day, today and recent recorded dates. Existing records are re-read/recomputed after import or edits; this is retrospective saved-data analysis, not automatic phone capture.
+
+Provide six sections: nutrition, sleep, workout sessions, daily activity, weight and vitals. Facts cite measured/estimated numbers and record coverage, explanations compare the same field with the prior7calendar days only when>=3known days, and suggestions refer to actual observations or missing records. Exclude the target/future days from baselines. Keep zero distinct from missing; use existing Apple/manual nutrition precedence and device-preferred one-sleep-per-day rules. Never sum ring minutes into workout minutes or subtract food calories from active/resting energy.
+
+Population clinical classifications, guessed calorie/protein targets, weight-loss prescriptions and diagnostic conclusions are out of scope without age/context. Wearable daily averages and changes are record summaries, not proof of health status. Prioritize at most3low-risk next steps; missing/partial food logs do not prove inadequate intake or excessive intake. General suggestions should follow primary-source public health guidance for regular sleep, varied meals and activity appropriate to the person's capacity.
+
+The owner-only daily_analysis action/MCP tool accepts optional day, defaults to latest stored day, loads the selected day plus prior28days, and returns the normal read_health context with structured analysis and last90recorded dates. No schema migration or health writes. UI escapes all generated text, shows date/coverage/method, and keeps request-generation guards for rapid date navigation. API/MCP tests verify owner isolation, historical selection and invalid dates; model tests verify calculations/unknowns/estimates; renderer tests verify source escaping and controls; whole-suite/build/review before private publish and sanitized GitHub push.
+
+## Verification
+Full163Node tests passed and Worker build passed. Independent focused review covered model calculations/source precedence/clinical restraint, owner/date API/MCP access, escaping and date-navigation races; reviewer reported no actionable defects. Model review fixes retained actual nutrient-only records, qualified estimated reference differences, and ensured available observations are not fully crowded out by missing-record reminders. No real health file or records were used in tests.
